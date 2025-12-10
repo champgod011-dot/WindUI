@@ -1,0 +1,272 @@
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = ".xcon hub  |  WindUI",
+    Author = "dc | discord.gg/P8qVhXfE",
+    Folder = "xconhub",
+    Icon = "map",
+    IconSize = 44,
+    NewElements = true,
+    HideSearchBar = false,
+    OpenButton = {
+        Title = "xcon hub UI",
+        CornerRadius = UDim.new(1,0),
+        StrokeThickness = 3,
+        Enabled = true,
+        Draggable = true,
+        Color = ColorSequence.new(Color3.fromHex("#30FF6A"), Color3.fromHex("#e7ff2f"))
+    }
+})
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- State variables
+local LockEnabled, LockTarget = false, nil
+local espEnabled = false
+local espObjects = {}
+local itemColors = {Pistol=Color3.fromRGB(255,255,0),Rifle=Color3.fromRGB(0,255,255),Shotgun=Color3.fromRGB(255,100,100)}
+local SpeedEnabled, SpeedMultiplier = false, 2
+local FlyEnabled, FlySpeed, flyBV = false, 3, nil
+local JumpBoostEnabled, JumpPowerValue = false, 70
+local WarpDistance = 20
+
+--==============================
+-- UI Tabs
+--==============================
+local CameraTab = Window:Tab({ Title = "Camera Lock + ESP", Icon = "map" })
+local MoveTab = Window:Tab({ Title = "Movement Hacks", Icon = "zap" })
+
+--==============================
+-- Camera Lock
+--==============================
+CameraTab:Toggle({
+    Title = "Enable Camera Lock",
+    Default = false,
+    Callback = function(state)
+        LockEnabled = state
+    end
+})
+
+local PlayerDropdown = CameraTab:Dropdown({
+    Title = "Select Player",
+    Default = "None",
+    Options = {},
+    Callback = function(selected)
+        LockTarget = (selected ~= "None") and Players:FindFirstChild(selected) or nil
+    end
+})
+
+local function UpdatePlayersDropdown()
+    local list = {"None"}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then table.insert(list, p.Name) end
+    end
+    PlayerDropdown:Refresh(list)
+end
+
+Players.PlayerAdded:Connect(UpdatePlayersDropdown)
+Players.PlayerRemoving:Connect(UpdatePlayersDropdown)
+UpdatePlayersDropdown()
+
+RunService.RenderStepped:Connect(function()
+    if LockEnabled and LockTarget and LockTarget.Character and LockTarget.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = LockTarget.Character.HumanoidRootPart
+        Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, hrp.Position)
+    end
+end)
+
+--==============================
+-- ESP
+--==============================
+local function getHeldItem(player)
+    local char = player.Character
+    if not char then return nil end
+    local tool = char:FindFirstChildWhichIsA("Tool")
+    if not tool then return nil end
+    return tool.Name, itemColors[tool.Name] or Color3.fromRGB(255,255,255)
+end
+
+local function createESP(player)
+    if not espEnabled or not player.Character or player == LocalPlayer then return end
+    local char = player.Character
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+
+    if espObjects[player] then
+        for _, o in ipairs(espObjects[player]) do o:Destroy() end
+    end
+    espObjects[player] = {}
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = char
+    highlight.FillTransparency = 0.7
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillColor = (player.Team == LocalPlayer.Team) and Color3.fromRGB(0,0,255) or Color3.fromRGB(255,0,0)
+    highlight.Parent = workspace
+    table.insert(espObjects[player], highlight)
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Adornee = head
+    billboard.Size = UDim2.new(0,150,0,45)
+    billboard.StudsOffset = Vector3.new(0,3,0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = head
+    table.insert(espObjects[player], billboard)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1,0,0.33,0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.DisplayName
+    nameLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    nameLabel.TextStrokeTransparency = 0.2
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextSize = 14
+    nameLabel.Parent = billboard
+
+    local itemLabel = Instance.new("TextLabel")
+    itemLabel.Size = UDim2.new(1,0,0.33,0)
+    itemLabel.Position = UDim2.new(0,0,0.33,0)
+    itemLabel.BackgroundTransparency = 1
+    itemLabel.TextStrokeTransparency = 0.2
+    itemLabel.Font = Enum.Font.SourceSansBold
+    itemLabel.TextSize = 13
+    itemLabel.Parent = billboard
+
+    local infoLabel = Instance.new("TextLabel")
+    infoLabel.Size = UDim2.new(1,0,0.33,0)
+    infoLabel.Position = UDim2.new(0,0,0.66,0)
+    infoLabel.BackgroundTransparency = 1
+    infoLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    infoLabel.TextStrokeTransparency = 0.3
+    infoLabel.Font = Enum.Font.SourceSansBold
+    infoLabel.TextSize = 13
+    infoLabel.Parent = billboard
+
+    task.spawn(function()
+        while espEnabled and player and player.Character and player ~= LocalPlayer do
+            local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local itemName, itemColor = getHeldItem(player)
+            if itemName then
+                itemLabel.Text = itemName
+                itemLabel.TextColor3 = itemColor
+            else
+                itemLabel.Text = ""
+            end
+            if humanoid and hrp and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                local hp = math.floor(humanoid.Health)
+                local dist = math.floor((LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude)
+                infoLabel.Text = "HP: "..hp.." | "..dist.."m"
+            end
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function setupPlayerESP(player)
+    player.CharacterAdded:Connect(function()
+        if espEnabled and player ~= LocalPlayer then
+            createESP(player)
+        end
+    end)
+    if espEnabled and player.Character and player ~= LocalPlayer then
+        createESP(player)
+    end
+end
+
+for _, p in pairs(Players:GetPlayers()) do
+    setupPlayerESP(p)
+end
+Players.PlayerAdded:Connect(setupPlayerESP)
+
+CameraTab:Toggle({
+    Title="ESP",
+    Default=false,
+    Callback=function(state)
+        espEnabled = state
+        if state then
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer then
+                    createESP(p)
+                end
+            end
+        else
+            for _, objs in pairs(espObjects) do
+                for _, o in ipairs(objs) do o:Destroy() end
+            end
+            espObjects = {}
+        end
+    end
+})
+
+--==============================
+-- Movement Hacks
+--==============================
+MoveTab:Toggle({ Title="SpeedHack", Default=false, Callback=function(state) SpeedEnabled=state end })
+MoveTab:Slider({ Title="Speed Multiplier", Step=1, Value={ Min=1, Max=10, Default=2 }, Callback=function(val) SpeedMultiplier=val end })
+
+MoveTab:Toggle({ Title="Fly", Default=false, Callback=function(state)
+    FlyEnabled=state
+    local char=LocalPlayer.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            if state then
+                if not flyBV then
+                    flyBV = Instance.new("BodyVelocity")
+                    flyBV.MaxForce=Vector3.new(1e9,1e9,1e9)
+                    flyBV.Velocity=Vector3.new(0,0,0)
+                    flyBV.Parent = hrp
+                end
+            else
+                if flyBV then flyBV:Destroy() flyBV=nil end
+            end
+        end
+    end
+end })
+
+MoveTab:Slider({ Title="Fly Speed", Step=1, Value={ Min=1, Max=20, Default=3 }, Callback=function(val) FlySpeed=val end })
+MoveTab:Toggle({ Title="JumpBoost", Default=false, Callback=function(state) JumpBoostEnabled=state end })
+MoveTab:Slider({ Title="Jump Power", Step=1, Value={ Min=20, Max=300, Default=70 }, Callback=function(val) JumpPowerValue=val end })
+
+MoveTab:Button({ Title="Warp to Selected Player", Callback=function()
+    if LockTarget and LockTarget.Character and LockTarget.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = LockTarget.Character.HumanoidRootPart.CFrame + Vector3.new(0,3,0)
+    end
+end })
+
+MoveTab:Slider({ Title="Warp Distance", Step=1, Value={ Min=5, Max=200, Default=20 }, Callback=function(val) WarpDistance=val end })
+MoveTab:Button({ Title="Warp Forward", Callback=function()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = LocalPlayer.Character.HumanoidRootPart
+        hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector*WarpDistance
+    end
+end })
+
+-- Per-frame updates
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hum then
+        hum.WalkSpeed = SpeedEnabled and (16*SpeedMultiplier) or 16
+        hum.JumpPower = JumpBoostEnabled and JumpPowerValue or 50
+    end
+    if FlyEnabled and hrp and flyBV then
+        local move = Vector3.new(0,0,0)
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then move = move - Vector3.new(0,1,0) end
+        flyBV.Velocity = (move.Magnitude > 0) and move.Unit*FlySpeed or Vector3.new(0,0,0)
+    end
+end)
