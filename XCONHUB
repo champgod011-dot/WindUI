@@ -1,0 +1,280 @@
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = ".xcon hub  |  WindUI",
+    Author = "dc | https://discord.gg/P8qVhXfE",
+    Folder = "xconhub",
+    Icon = "map",
+    IconSize = 44,
+    NewElements = true,
+    HideSearchBar = false,
+    DarkMode = true,
+    OpenButton = {
+        Title = "xcon hub UI",
+        CornerRadius = UDim.new(1,0),
+        StrokeThickness = 3,
+        Enabled = true,
+        Draggable = true,
+        OnlyMobile = false,
+        Color = ColorSequence.new(Color3.fromHex("#30FF6A"), Color3.fromHex("#e7ff2f"))
+    },
+    KeySystem = {
+        Title = "ช่วงทดลอง",
+        Note = "Keyซื้อได้ที่แอดมิน",
+        KeyValidator = function(EnteredKey)
+            return EnteredKey == "GOLF1122"
+        end
+    }
+})
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ByteNetReliable = ReplicatedStorage:WaitForChild("ByteNetReliable")
+
+-- ============================ --
+--           ESP / Warp / JumpBoost
+-- ============================ --
+local Tab = Window:Tab({Title="ESP / Warp / Jump", Icon="info"})
+
+-- ---------- ESP ----------
+local espEnabled = false
+local espObjects = {}
+local itemColors = {Pistol=Color3.fromRGB(255,255,0),Rifle=Color3.fromRGB(0,255,255),Shotgun=Color3.fromRGB(255,100,100)}
+
+local function getHeldItem(player)
+    local char = player.Character
+    if not char then return nil end
+    local tool = char:FindFirstChildWhichIsA("Tool")
+    if not tool then return nil end
+    return tool.Name, itemColors[tool.Name] or Color3.fromRGB(255,255,255)
+end
+
+local function createESP(player)
+    if not espEnabled or not player.Character then return end
+    local char = player.Character
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+
+    if espObjects[player] then
+        for _, o in ipairs(espObjects[player]) do o:Destroy() end
+    end
+    espObjects[player] = {}
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = char
+    highlight.FillTransparency = 0.7
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillColor = (player.Team == LocalPlayer.Team) and Color3.fromRGB(0,0,255) or Color3.fromRGB(255,0,0)
+    highlight.Parent = Workspace
+    table.insert(espObjects[player], highlight)
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Adornee = head
+    billboard.Size = UDim2.new(0,150,0,45)
+    billboard.StudsOffset = Vector3.new(0,3,0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = head
+    table.insert(espObjects[player], billboard)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1,0,0.33,0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.DisplayName
+    nameLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    nameLabel.TextStrokeTransparency = 0.2
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextSize = 14
+    nameLabel.Parent = billboard
+
+    local itemLabel = Instance.new("TextLabel")
+    itemLabel.Size = UDim2.new(1,0,0.33,0)
+    itemLabel.Position = UDim2.new(0,0,0.33,0)
+    itemLabel.BackgroundTransparency = 1
+    itemLabel.TextStrokeTransparency = 0.2
+    itemLabel.Font = Enum.Font.SourceSansBold
+    itemLabel.TextSize = 13
+    itemLabel.Parent = billboard
+
+    local infoLabel = Instance.new("TextLabel")
+    infoLabel.Size = UDim2.new(1,0,0.33,0)
+    infoLabel.Position = UDim2.new(0,0,0.66,0)
+    infoLabel.BackgroundTransparency = 1
+    infoLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    infoLabel.TextStrokeTransparency = 0.3
+    infoLabel.Font = Enum.Font.SourceSansBold
+    infoLabel.TextSize = 13
+    infoLabel.Parent = billboard
+
+    task.spawn(function()
+        while espEnabled and player and player.Character do
+            local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local itemName, itemColor = getHeldItem(player)
+            if itemName then
+                itemLabel.Text = itemName
+                itemLabel.TextColor3 = itemColor
+            else itemLabel.Text = "" end
+            if humanoid and hrp and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                local hp = math.floor(humanoid.Health)
+                local dist = math.floor((LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude)
+                infoLabel.Text = "HP: "..hp.." | "..dist.."m"
+            end
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function setupPlayerESP(player)
+    player.CharacterAdded:Connect(function()
+        if espEnabled then
+            createESP(player)
+        end
+    end)
+    if espEnabled and player.Character then
+        createESP(player)
+    end
+end
+
+for _, p in pairs(Players:GetPlayers()) do
+    setupPlayerESP(p)
+end
+Players.PlayerAdded:Connect(setupPlayerESP)
+
+Tab:Toggle({Title="ESP", Default=false, Callback=function(state)
+    espEnabled = state
+    if state then
+        for _, p in pairs(Players:GetPlayers()) do
+            createESP(p)
+        end
+    else
+        for _, objs in pairs(espObjects) do
+            for _, o in ipairs(objs) do o:Destroy() end
+        end
+        espObjects = {}
+    end
+end})
+
+-- ---------- Warp ----------
+local WarpEnabled = false
+local warpDistance = 0.4
+local warpCooldown = 0.05
+local lastWarp = 0
+
+RunService.Heartbeat:Connect(function()
+    if not WarpEnabled then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
+    if not hrp or not hum then return end
+    if tick() - lastWarp >= warpCooldown then
+        local moveDir = hum.MoveDirection
+        if moveDir.Magnitude > 0 then
+            hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector * warpDistance
+            lastWarp = tick()
+        end
+    end
+end)
+
+Tab:Toggle({Title="Warp", Default=false, Callback=function(state) WarpEnabled = state end})
+Tab:Slider({
+    Title="Warp Speed",
+    Step=0.05,
+    Width=200,
+    Value={Min=0.1, Max=5, Default=warpDistance},
+    Callback=function(value)
+        warpDistance = value
+    end
+})
+
+-- ---------- Jump Boost ----------
+local JumpEnabled = false
+local jumpPower = 50
+
+Tab:Toggle({Title="Jump Boost", Default=false, Callback=function(state)
+    JumpEnabled = state
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid") then
+        LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid").JumpPower = jumpPower
+    end
+end})
+Tab:Slider({
+    Title="Jump Power",
+    Step=1,
+    Width=200,
+    Value={Min=50, Max=500, Default=jumpPower},
+    Callback=function(value)
+        jumpPower = value
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid") then
+            LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid").JumpPower = value
+        end
+    end
+})
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if JumpEnabled then
+        local humanoid = char:WaitForChild("Humanoid")
+        humanoid.JumpPower = jumpPower
+    end
+end)
+
+-- ============================ --
+--           Auto Hit
+-- ============================ --
+local AutoHitTab = Window:Tab({Title="Auto Hit", Icon="sword"})
+local AutoHitEnabled = false
+local HitDistance = 100
+
+local function IsInRange(target)
+    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+        local distance = (LocalPlayer.Character.HumanoidRootPart.Position - target.Character.HumanoidRootPart.Position).Magnitude
+        return distance <= HitDistance
+    end
+    return false
+end
+
+local function GetNearestPlayer()
+    local nearest = nil
+    local shortestDist = math.huge
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local dist = (LocalPlayer.Character.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
+            if dist < shortestDist then
+                shortestDist = dist
+                nearest = player
+            end
+        end
+    end
+    return nearest
+end
+
+local function AutoHit()
+    local target = GetNearestPlayer()
+    if target and IsInRange(target) then
+        local args = {"Hit", target.UserId}
+        ByteNetReliable:FireServer(unpack(args))
+    end
+end
+
+RunService.Heartbeat:Connect(function()
+    if AutoHitEnabled then
+        AutoHit()
+    end
+end)
+
+AutoHitTab:Toggle({Title="Enable Auto Hit", Default=false, Callback=function(state)
+    AutoHitEnabled = state
+end})
+
+AutoHitTab:Slider({
+    Title="Hit Distance",
+    Step=1,
+    Width=200,
+    Value={Min=10, Max=200, Default=HitDistance},
+    Callback=function(value)
+        HitDistance = value
+        print("HitDistance set to:", HitDistance)
+    end
+})
