@@ -1,0 +1,318 @@
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = ".xcon hub  |  WindUI",
+    Author = "dc | https://discord.gg/P8qVhXfE",
+    Folder = "xconhub",
+    Icon = "map",
+    IconSize = 44,
+    NewElements = true,
+    HideSearchBar = false,
+    DarkMode = true
+})
+
+-- ============================ --
+-- SERVICES
+-- ============================ --
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- ============================ --
+-- CONFIG
+-- ============================ --
+local SilentAimEnabled = false
+local TracerEnabled = true
+local espEnabled = false
+local AntiAimEnabled = false
+local RandomAntiAim = false
+local SpinSpeed = 6000
+local WarpEnabled = false
+local warpDistance = 0.4
+local warpCooldown = 0.05
+local lastWarp = 0
+local AutoPickupEnabled = false
+local pickupRadius = 15
+local pickupSpeed = 0.3
+local FOV = 150
+
+local GunNames = {"P226","MP5","M24","Draco","Glock","Sawnoff","Uzi","G3","C9","Hunting Rifle","Anaconda","AK47","Remington","Double Barrel"}
+local GunLookup = {}
+for _, v in ipairs(GunNames) do GunLookup[v] = true end
+
+local espObjects = {}
+local itemColors = {Pistol=Color3.fromRGB(255,255,0),Rifle=Color3.fromRGB(0,255,255),Shotgun=Color3.fromRGB(255,100,100)}
+
+-- ============================ --
+-- DRAWING
+-- ============================ --
+local fovCircle = Drawing.new("Circle")
+fovCircle.Color = Color3.fromRGB(255,255,255)
+fovCircle.Thickness = 2
+fovCircle.NumSides = 100
+fovCircle.Radius = FOV
+fovCircle.Filled = false
+fovCircle.Visible = false
+
+local tracerLine = Drawing.new("Line")
+tracerLine.Color = Color3.fromRGB(255,0,0)
+tracerLine.Thickness = 2
+tracerLine.Visible = false
+
+-- ============================ --
+-- FUNCTIONS
+-- ============================ --
+local function GetBestAimPart(character)
+    return character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetClosestTarget()
+    local closest
+    local shortest = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local part = GetBestAimPart(player.Character)
+            if part then
+                local screenPos, inView = Camera:WorldToViewportPoint(part.Position)
+                if inView then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                    if dist < FOV and dist < shortest then
+                        shortest = dist
+                        closest = player
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function IsHoldingAllowedGun(args)
+    local ok, weapon = pcall(function() return args[3] end)
+    if ok and typeof(weapon)=="Instance" and GunLookup[weapon.Name] then return true end
+    for _, tool in ipairs(LocalPlayer.Character:GetChildren()) do
+        if (tool:IsA("Tool") or tool:IsA("Model")) and GunLookup[tool.Name] then return true end
+    end
+    return false
+end
+
+-- ============================ --
+-- HOOK FIRE (Silent Aim)
+-- ============================ --
+local send = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Send")
+local oldFire
+oldFire = hookfunction(send.FireServer, function(self, ...)
+    local args = {...}
+    if SilentAimEnabled and IsHoldingAllowedGun(args) then
+        local target = GetClosestTarget()
+        if target and target.Character then
+            local head = target.Character:FindFirstChild("Head")
+            if head then
+                args[4] = CFrame.new(math.huge, math.huge, math.huge)
+                args[5] = {[1] = {[1] = {["Instance"] = head, ["Position"] = head.Position}}}
+            end
+        end
+    end
+    return oldFire(self, unpack(args))
+end)
+
+-- ============================ --
+-- ESP
+-- ============================ --
+local function removeESP(player)
+    if espObjects[player] then
+        for _, obj in ipairs(espObjects[player]) do
+            if obj and obj.Parent then obj:Destroy() end
+        end
+        espObjects[player] = nil
+    end
+end
+
+local function createESP(player)
+    removeESP(player)
+    if not espEnabled or not player.Character or player == LocalPlayer then return end
+    local char = player.Character
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+
+    espObjects[player] = {}
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = char
+    highlight.FillTransparency = 0.7
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillColor = (player.Team == LocalPlayer.Team) and Color3.fromRGB(0,0,255) or Color3.fromRGB(255,0,0)
+    highlight.Parent = workspace
+    table.insert(espObjects[player], highlight)
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Adornee = head
+    billboard.Size = UDim2.new(0,150,0,45)
+    billboard.StudsOffset = Vector3.new(0,3,0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = head
+    table.insert(espObjects[player], billboard)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1,0,1,0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    nameLabel.TextStrokeTransparency = 0.2
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextSize = 14
+    nameLabel.Text = player.DisplayName
+    nameLabel.Parent = billboard
+
+    task.spawn(function()
+        while espEnabled and player and player.Character do
+            if not nameLabel or not nameLabel.Parent then break end
+            local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if humanoid and hrp and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                local hp = math.floor(humanoid.Health)
+                local dist = math.floor((LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude)
+                nameLabel.Text = player.DisplayName.." | HP:"..hp.." | "..dist.."m"
+            end
+            task.wait(0.1)
+        end
+        removeESP(player)
+    end)
+end
+
+local function setupPlayerESP(player)
+    player.CharacterAdded:Connect(function()
+        if espEnabled then createESP(player) end
+    end)
+    if espEnabled and player.Character then
+        createESP(player)
+    end
+end
+
+for _, p in pairs(Players:GetPlayers()) do
+    setupPlayerESP(p)
+end
+Players.PlayerAdded:Connect(setupPlayerESP)
+
+-- ============================ --
+-- RenderStepped (FOV + Tracer + Anti-Aim)
+-- ============================ --
+RunService.RenderStepped:Connect(function(deltaTime)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- FOV Circle
+    fovCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    fovCircle.Radius = FOV
+    fovCircle.Visible = SilentAimEnabled
+
+    -- Tracer
+    if TracerEnabled then
+        local target = GetClosestTarget()
+        if target and target.Character then
+            local head = target.Character:FindFirstChild("Head")
+            if head then
+                local screen, onScreen = Camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    tracerLine.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+                    tracerLine.To = Vector2.new(screen.X, screen.Y)
+                    tracerLine.Visible = true
+                else
+                    tracerLine.Visible = false
+                end
+            else
+                tracerLine.Visible = false
+            end
+        else
+            tracerLine.Visible = false
+        end
+    else
+        tracerLine.Visible = false
+    end
+
+    -- Anti-Aim
+    if AntiAimEnabled then
+        if RandomAntiAim then
+            local randomPitch = math.rad(math.random(-45,45))
+            local randomYaw = math.rad(math.random(-180,180))
+            hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(randomPitch, randomYaw, 0)
+        else
+            hrp.CFrame = hrp.CFrame * CFrame.Angles(0, math.rad(SpinSpeed * deltaTime), 0)
+        end
+    end
+end)
+
+-- ============================ --
+-- Heartbeat (Warp + Auto Pickup)
+-- ============================ --
+RunService.Heartbeat:Connect(function()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
+    if not hrp or not hum then return end
+
+    -- Warp
+    if WarpEnabled and tick() - lastWarp >= warpCooldown then
+        local moveDir = hum.MoveDirection
+        if moveDir.Magnitude > 0 then
+            hrp.CFrame = CFrame.new(hrp.Position + moveDir.Unit * warpDistance, hrp.Position + moveDir.Unit * 10)
+            lastWarp = tick()
+        end
+    end
+
+    -- Auto Pickup
+    if AutoPickupEnabled and workspace:FindFirstChild("DroppedItems") then
+        for _, item in pairs(workspace.DroppedItems:GetChildren()) do
+            local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if not prompt then continue end
+
+            local dist = (hrp.Position - item.Position).Magnitude
+            if dist <= pickupRadius then
+                pcall(function()
+                    remoteGet:InvokeServer("pickup_dropped_item", item)
+                end)
+                if item:IsA("BasePart") then
+                    item.CFrame = item.CFrame:Lerp(CFrame.new(hrp.Position), pickupSpeed)
+                else
+                    local part = item:FindFirstChildWhichIsA("BasePart")
+                    if part then
+                        part.CFrame = part.CFrame:Lerp(CFrame.new(hrp.Position), pickupSpeed)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ============================ --
+-- UI
+-- ============================ --
+local CombatTab = Window:Tab({Title="Combat", Icon="sword"})
+CombatTab:Toggle({Title="Silent Aim", Default=false, Callback=function(state) SilentAimEnabled=state end})
+CombatTab:Toggle({Title="Tracer", Default=true, Callback=function(state) TracerEnabled=state end})
+CombatTab:Toggle({Title="ESP", Default=false, Callback=function(state) espEnabled=state
+    if not state then
+        for player, _ in pairs(espObjects) do removeESP(player) end
+    else
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then createESP(player) end
+        end
+    end
+end})
+CombatTab:Toggle({Title="Anti-Aim", Default=false, Callback=function(state) AntiAimEnabled=state end})
+CombatTab:Toggle({Title="Random Anti-Aim", Default=false, Callback=function(state) RandomAntiAim=state end})
+CombatTab:Slider({Title="Spin Speed", Step=10, Width=200, Value={Min=0, Max=10000, Default=SpinSpeed}, Callback=function(val) SpinSpeed=val end})
+CombatTab:Slider({Title="FOV", Step=1, Width=200, Value={Min=50, Max=300, Default=FOV}, Callback=function(val) FOV=val end})
+
+local WarpTab = Window:Tab({Title="Warp", Icon="info"})
+WarpTab:Toggle({Title="Warp", Default=false, Callback=function(state) WarpEnabled=state end})
+WarpTab:Slider({Title="Warp Distance", Step=0.1, Width=200, Value={Min=0.1, Max=5, Default=warpDistance}, Callback=function(val) warpDistance=val end})
+
+local AutoTab = Window:Tab({Title="Auto", Icon="hand"})
+AutoTab:Toggle({Title="Auto Pickup", Default=false, Callback=function(state) AutoPickupEnabled=state end})
