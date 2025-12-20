@@ -1,0 +1,284 @@
+GitHub Repo
+ └── loader.lua      ← เปิดเผย (สั้น อ่านไม่รู้เรื่อง)
+ └── main.lua        ← Obfuscate แล้ว
+
+--// Load WindUI
+local WindUI = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"
+))()
+
+--// Window
+local Window = WindUI:CreateWindow({
+    Title = "NEVER HUB",
+    Author = "TEST",
+    Theme = "Dark",
+    Transparent = true,
+    Blur = true,
+})
+
+--// Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+--// States
+local LockEnabled = false
+local FOVRadius = 150
+local espEnabled = false
+local espObjects = {}
+
+local SpeedEnabled, SpeedMultiplier = false, 2
+local FlyEnabled, FlySpeed = false, 3
+local JumpBoostEnabled, JumpPowerValue = false, 70
+local WarpDistance = 20
+local flyBV
+
+--==============================
+-- Tabs
+--==============================
+local CameraTab = Window:Tab({
+    Title = "Camera + ESP",
+    Icon = "map"
+})
+
+local MoveTab = Window:Tab({
+    Title = "Movement",
+    Icon = "zap"
+})
+
+--==============================
+-- Camera Lock + FOV
+--==============================
+CameraTab:Toggle({
+    Title = "Camera Lock",
+    Default = false,
+    Callback = function(v)
+        LockEnabled = v
+    end
+})
+
+CameraTab:Slider({
+    Title = "FOV Radius",
+    Step = 5,
+    Value = {Min=50, Max=300, Default=FOVRadius},
+    Callback = function(v)
+        FOVRadius = v
+    end
+})
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Color = Color3.fromRGB(255,0,0)
+FOVCircle.Thickness = 2
+FOVCircle.Transparency = 0.8
+FOVCircle.Filled = false
+FOVCircle.Visible = true
+
+--==============================
+-- ESP FUNCTIONS
+--==============================
+local function clearESP(player)
+    if espObjects[player] then
+        for _,o in pairs(espObjects[player]) do
+            if o.Destroy then o:Destroy() end
+        end
+        espObjects[player] = nil
+    end
+end
+
+local function createESP(player)
+    if player == LocalPlayer then return end
+    if not player.Character then return end
+    local char = player.Character
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+
+    clearESP(player)
+    espObjects[player] = {}
+
+    local hl = Instance.new("Highlight")
+    hl.Adornee = char
+    hl.FillTransparency = 0.75
+    hl.OutlineTransparency = 0
+    hl.FillColor = Color3.fromRGB(255,0,0)
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = char
+    table.insert(espObjects[player], hl)
+
+    local bb = Instance.new("BillboardGui")
+    bb.Adornee = head
+    bb.Size = UDim2.new(0,160,0,50)
+    bb.StudsOffset = Vector3.new(0,3.2,0)
+    bb.AlwaysOnTop = true
+    bb.Parent = head
+    table.insert(espObjects[player], bb)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1,0,0.5,0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.DisplayName
+    nameLabel.TextColor3 = Color3.new(1,1,1)
+    nameLabel.TextStrokeTransparency = 0.2
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextSize = 14
+    nameLabel.Parent = bb
+
+    local infoLabel = Instance.new("TextLabel")
+    infoLabel.Name = "Info"
+    infoLabel.Position = UDim2.new(0,0,0.5,0)
+    infoLabel.Size = UDim2.new(1,0,0.5,0)
+    infoLabel.BackgroundTransparency = 1
+    infoLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    infoLabel.TextStrokeTransparency = 0.3
+    infoLabel.Font = Enum.Font.SourceSans
+    infoLabel.TextSize = 13
+    infoLabel.Parent = bb
+end
+
+CameraTab:Toggle({
+    Title = "ESP",
+    Default = false,
+    Callback = function(v)
+        espEnabled = v
+        if v then
+            for _,p in pairs(Players:GetPlayers()) do
+                createESP(p)
+            end
+        else
+            for p,_ in pairs(espObjects) do
+                clearESP(p)
+            end
+        end
+    end
+})
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function()
+        if espEnabled then
+            task.wait(1)
+            createESP(p)
+        end
+    end)
+end)
+
+--==============================
+-- Movement
+--==============================
+MoveTab:Toggle({
+    Title="Speed",
+    Callback=function(v) SpeedEnabled=v end
+})
+
+MoveTab:Slider({
+    Title="Speed Multiplier",
+    Step=1,
+    Value={Min=1,Max=10,Default=2},
+    Callback=function(v) SpeedMultiplier=v end
+})
+
+MoveTab:Toggle({
+    Title="Fly (Anti Pull)",
+    Callback=function(v)
+        FlyEnabled=v
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        if v then
+            flyBV = Instance.new("BodyVelocity")
+            flyBV.MaxForce = Vector3.new(1e5,1e5,1e5)
+            flyBV.Parent = hrp
+        else
+            if flyBV then flyBV:Destroy() flyBV=nil end
+        end
+    end
+})
+
+MoveTab:Slider({
+    Title="Fly Speed",
+    Step=1,
+    Value={Min=1,Max=20,Default=3},
+    Callback=function(v) FlySpeed=v end
+})
+
+MoveTab:Toggle({
+    Title="Jump Boost",
+    Callback=function(v) JumpBoostEnabled=v end
+})
+
+MoveTab:Slider({
+    Title="Jump Power",
+    Step=5,
+    Value={Min=20,Max=300,Default=70},
+    Callback=function(v) JumpPowerValue=v end
+})
+
+MoveTab:Button({
+    Title="Warp Forward",
+    Callback=function()
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector * WarpDistance
+        end
+    end
+})
+
+--==============================
+-- RenderStepped
+--==============================
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    if hum then
+        hum.WalkSpeed = SpeedEnabled and (16*SpeedMultiplier) or 16
+        hum.JumpPower = JumpBoostEnabled and JumpPowerValue or 50
+    end
+
+    if FlyEnabled and flyBV and hum then
+        flyBV.Velocity = hum.MoveDirection * FlySpeed
+    end
+
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    FOVCircle.Position = center
+    FOVCircle.Radius = FOVRadius
+
+    -- Camera Lock
+    if LockEnabled then
+        local closest, dist = nil, math.huge
+        for _,p in pairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
+                local pos,onScreen = Camera:WorldToViewportPoint(p.Character.Head.Position)
+                if onScreen then
+                    local d = (Vector2.new(pos.X,pos.Y)-center).Magnitude
+                    if d<dist and d<=FOVRadius then
+                        dist=d
+                        closest=p
+                    end
+                end
+            end
+        end
+        if closest and closest.Character then
+            Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, closest.Character.Head.Position)
+        end
+    end
+
+    -- ESP Update
+    if espEnabled and hrp then
+        for player,objs in pairs(espObjects) do
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local phum = player.Character:FindFirstChildOfClass("Humanoid")
+                local phrp = player.Character.HumanoidRootPart
+                for _,o in pairs(objs) do
+                    if o:IsA("BillboardGui") then
+                        local info = o:FindFirstChild("Info")
+                        if info and phum then
+                            local dist = (hrp.Position - phrp.Position).Magnitude
+                            info.Text = math.floor(dist).."m | HP "..math.floor(phum.Health)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
