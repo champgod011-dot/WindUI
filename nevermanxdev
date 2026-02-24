@@ -1,0 +1,651 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local function CreateBeam(startPos, endPos)
+    local part0 = Instance.new("Part")
+    part0.Anchored = true
+    part0.CanCollide = false
+    part0.Transparency = 1
+    part0.Position = startPos
+    part0.Parent = workspace
+
+    local att0 = Instance.new("Attachment")
+    att0.Parent = part0
+
+    local part1 = Instance.new("Part")
+    part1.Anchored = true
+    part1.CanCollide = false
+    part1.Transparency = 1
+    part1.Position = endPos
+    part1.Parent = workspace
+
+    local att1 = Instance.new("Attachment")
+    att1.Parent = part1
+
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = att0
+    beam.Attachment1 = att1
+    beam.Width0 = 0.2
+    beam.Width1 = 0.05
+    beam.FaceCamera = true
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Color = ColorSequence.new(Color3.fromRGB(255,0,0))
+    beam.Parent = part0
+
+    Debris:AddItem(part0, 0.25)
+    Debris:AddItem(part1, 0.25)
+end
+
+local SilentAimEnabled = true
+local FOV = 150
+local CurrentTarget
+local head, aimPos
+
+local GunNames = {
+    "P226","MP5","M24","Draco","Glock","Sawnoff","Uzi","G3","C9",
+    "Hunting Rifle","Anaconda","AK47","Remington","Double Barrel"
+}
+local GunLookup = {}
+for _, name in pairs(GunNames) do GunLookup[name] = true end
+
+local fovCircle = Drawing.new("Circle")
+fovCircle.Color = Color3.new(1,1,1)
+fovCircle.Thickness = 2
+fovCircle.NumSides = 100
+fovCircle.Radius = FOV
+fovCircle.Filled = false
+fovCircle.Visible = true
+fovCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+local PREDICTION_FACTOR = 0.165
+
+local function GetClosestTarget()
+    local closest
+    local shortest = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character.Head.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                if dist < FOV and dist < shortest then
+                    shortest = dist
+                    closest = player
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function PredictPosition(headPart)
+    local root = headPart.Parent:FindFirstChild("HumanoidRootPart")
+    if not root then return headPart.Position end
+    
+    local velocity = root.Velocity
+    local prediction = headPart.Position + (velocity * PREDICTION_FACTOR)
+    
+    local seat = root:FindFirstChildWhichIsA("WeldConstraint") or root:FindFirstChildWhichIsA("Weld")
+    if seat and seat.Part0 then
+        prediction = headPart.Position + (seat.Part0.Velocity * PREDICTION_FACTOR * 1.2)
+    end
+    
+    return prediction
+end
+
+local function IsHoldingAllowedGun(args)
+    local ok, weapon = pcall(function() return args[3] end)
+    if not ok then return false end
+    if typeof(weapon) == "Instance" and GunLookup[weapon.Name] then
+        return true
+    end
+    for _, child in pairs(LocalPlayer.Character:GetChildren()) do
+        if (child:IsA("Tool") or child:IsA("Model")) and GunLookup[child.Name] then
+            return true
+        end
+    end
+    return false
+end
+
+local send = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Send")
+local oldFire
+
+oldFire = hookfunction(send.FireServer, function(self, ...)
+    local args = {...}
+    
+    if SilentAimEnabled and IsHoldingAllowedGun(args) then
+        
+        CurrentTarget = GetClosestTarget()
+        
+        if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
+            
+            head = CurrentTarget.Character.Head
+            aimPos = PredictPosition(head)
+
+            -- เพิ่ม Beam (ไม่แก้ logic เดิม)
+            local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
+            if myHead then
+                CreateBeam(myHead.Position, aimPos)
+            end
+
+            args[4] = CFrame.new(math.huge, math.huge, math.huge)
+            args[5] = {[1]={[1]={["Instance"]=head,["Position"]=aimPos}}}
+        end
+        
+    end
+    
+    return oldFire(self, unpack(args))
+end)
+
+local tracerLine = Drawing.new("Line")
+tracerLine.Color = Color3.new(1,0,0)
+tracerLine.Thickness = 2
+tracerLine.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    
+    fovCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    fovCircle.Radius = FOV
+    
+    local target = GetClosestTarget()
+    
+    if target and target.Character and target.Character:FindFirstChild("Head") then
+        
+        local predictedPos = PredictPosition(target.Character.Head)
+        local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos)
+        
+        if onScreen then
+            
+            local ourHeadPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") and LocalPlayer.Character.Head.Position
+            
+            if ourHeadPos then
+                
+                local screenStart, startOnScreen = Camera:WorldToViewportPoint(ourHeadPos)
+                
+                if startOnScreen then
+                    
+                    tracerLine.From = Vector2.new(screenStart.X, screenStart.Y)
+                    tracerLine.To = Vector2.new(screenPos.X, screenPos.Y)
+                    tracerLine.Visible = true
+                    
+                else
+                    tracerLine.Visible = false
+                end
+                
+            else
+                tracerLine.Visible = false
+            end
+            
+        else
+            tracerLine.Visible = false
+        end
+        
+    else
+        tracerLine.Visible = false
+    end
+    
+end)
+
+_G.InventoryViewerEnabled = false
+
+if not _G.ViewerRunning then
+_G.ViewerRunning = true
+
+local function GetColorFromRarity(rarityName)  
+    local colors = {  
+        ["Common"] = Color3.fromRGB(255, 255, 255),  
+        ["UnCommon"] = Color3.fromRGB(99, 255, 52),  
+        ["Rare"] = Color3.fromRGB(51, 170, 255),  
+        ["Legendary"] = Color3.fromRGB(255, 150, 0),  
+        ["Epic"] = Color3.fromRGB(237, 44, 255),  
+        ["Omega"] = Color3.fromRGB(255, 20, 51)  
+    }  
+    return colors[rarityName] or Color3.fromRGB(255, 255, 255)  
+end  
+
+task.spawn(function()  
+    while task.wait(0.2) do  
+        if _G.InventoryViewerEnabled then  
+            pcall(function()  
+                for _, player in pairs(Players:GetPlayers()) do  
+                    if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then  
+                        local root = player.Character.HumanoidRootPart  
+                        local gui = root:FindFirstChild("ItemBillboard")  
+                        if not gui then  
+                            gui = Instance.new("BillboardGui")  
+                            gui.Name = "ItemBillboard"  
+                            gui.AlwaysOnTop = true  
+                            gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling  
+                            gui.Size = UDim2.fromOffset(150, 40)  
+                            gui.StudsOffsetWorldSpace = Vector3.new(0, -14, 0)  
+                            gui.ExtentsOffset = Vector3.new(0, 0, 0)  
+                            gui.LightInfluence = 0  
+                            gui.MaxDistance = math.huge  
+                            gui.Parent = root  
+
+                            local bg = Instance.new("Frame")  
+                            bg.Name = "BG"  
+                            bg.BackgroundTransparency = 1  
+                            bg.Size = UDim2.fromOffset(150, 40)  
+                            bg.Position = UDim2.fromOffset(0, 0)  
+                            bg.AnchorPoint = Vector2.new(0, 0)  
+                            bg.Parent = gui  
+
+                            local layout = Instance.new("UIListLayout")  
+                            layout.FillDirection = Enum.FillDirection.Horizontal  
+                            layout.HorizontalAlignment = Enum.HorizontalAlignment.Center  
+                            layout.VerticalAlignment = Enum.VerticalAlignment.Center  
+                            layout.Padding = UDim.new(0, 4)  
+                            layout.Parent = bg  
+                        end  
+
+                        local bg = gui:FindFirstChild("BG")  
+                        if bg then  
+                            local Items = {}  
+                            for _, child in pairs(bg:GetChildren()) do  
+                                if child:IsA("Frame") then  
+                                    child:Destroy()  
+                                end  
+                            end  
+
+                            for _, container in pairs({player:FindFirstChild("Backpack"), player.Character}) do  
+                                if container then  
+                                    for _, tool in pairs(container:GetChildren()) do  
+                                        if tool:IsA("Tool") and not tool:GetAttribute("JobTool") and not tool:GetAttribute("Locked") then  
+                                            local itemFolder = tool:GetAttribute("AmmoType") and ReplicatedStorage.Items.gun or ReplicatedStorage.Items.melee  
+                                            for _, z in pairs(itemFolder:GetChildren()) do  
+                                                if tool:GetAttribute("RarityName") == z:GetAttribute("RarityName")  
+                                                    and tool:GetAttribute("RarityPrice") == z:GetAttribute("RarityPrice") then  
+
+                                                    local imageId = z:GetAttribute("ImageId")  
+                                                    if imageId then  
+                                                        Items[z.Name] = true  
+                                                        if not bg:FindFirstChild(z.Name .. "_bg") then  
+
+                                                            local itemContainer = Instance.new("Frame")  
+                                                            itemContainer.Name = z.Name .. "_bg"  
+                                                            itemContainer.Size = UDim2.fromOffset(20, 20)  
+                                                            itemContainer.BackgroundTransparency = 1  
+                                                            itemContainer.BorderSizePixel = 0  
+                                                            itemContainer.Parent = bg  
+
+                                                            local iconBg = Instance.new("Frame")  
+                                                            iconBg.Name = "IconBg"  
+                                                            iconBg.Size = UDim2.fromOffset(20, 20)  
+                                                            iconBg.Position = UDim2.fromOffset(0, 0)  
+                                                            iconBg.BackgroundColor3 = GetColorFromRarity(z:GetAttribute("RarityName"))  
+                                                            iconBg.BackgroundTransparency = 1  
+                                                            iconBg.BorderSizePixel = 0  
+                                                            iconBg.Parent = itemContainer  
+
+                                                            local bgImage = Instance.new("ImageLabel")  
+                                                            bgImage.Name = "Background"  
+                                                            bgImage.Size = UDim2.fromScale(1, 1)  
+                                                            bgImage.BackgroundTransparency = 1  
+                                                            bgImage.Image = "rbxassetid://137066731814190"  
+                                                            bgImage.ImageColor3 = GetColorFromRarity(z:GetAttribute("RarityName"))  
+                                                            bgImage.ZIndex = 0  
+                                                            bgImage.Parent = iconBg  
+
+                                                            local corner = Instance.new("UICorner")  
+                                                            corner.CornerRadius = UDim.new(0.15, 0)  
+                                                            corner.Parent = iconBg  
+
+                                                            local icon = Instance.new("ImageLabel")  
+                                                            icon.Name = z.Name  
+                                                            icon.Image = imageId  
+                                                            icon.BackgroundTransparency = 1  
+                                                            icon.BorderSizePixel = 0  
+                                                            icon.Size = UDim2.fromOffset(16, 16)  
+                                                            icon.Position = UDim2.fromOffset(2, 2)  
+                                                            icon.Parent = iconBg  
+
+                                                            local corner2 = Instance.new("UICorner")  
+                                                            corner2.CornerRadius = UDim.new(0, 5)  
+                                                            corner2.Parent = icon  
+                                                        end  
+                                                    end  
+                                                end  
+                                            end  
+                                        end  
+                                    end  
+                                end  
+                            end  
+
+                            gui.Enabled = _G.InventoryViewerEnabled  
+                            for _, child in pairs(bg:GetChildren()) do  
+                                if child:IsA("Frame") then  
+                                    local itemName = child.Name:gsub("_bg$", "")  
+                                    if not Items[itemName] then  
+                                        child:Destroy()  
+                                    end  
+                                end  
+                            end  
+                        end  
+                    end  
+                end  
+            end)  
+        else  
+            for _, player in pairs(Players:GetPlayers()) do  
+                if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then  
+                    local gui = player.Character.HumanoidRootPart:FindFirstChild("ItemBillboard")  
+                    if gui then  
+                        gui:Destroy()  
+                    end  
+                end  
+            end  
+        end  
+    end  
+end)
+
+end
+
+_G.InfiniteStamina = false
+
+task.spawn(function()
+pcall(function()
+local SprintModule = require(game:GetService("ReplicatedStorage").Modules.Game.Sprint)
+local consume_stamina = SprintModule.consume_stamina
+local SprintBar = debug.getupvalue(consume_stamina, 2).sprint_bar
+local __InfiniteStamina = SprintBar.update
+
+SprintBar.update = function(...)  
+        if _G.InfiniteStamina then  
+            return __InfiniteStamina(function()  
+                return 0.5  
+            end)  
+        end  
+        return __InfiniteStamina(...)  
+    end  
+end)
+
+end)
+
+
+repeat task.wait() until game:IsLoaded()
+
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+Title = "Neverman x'Dev",
+Author = "Kiwwy",
+
+Icon = "rbxassetid://72830195117719",  
+
+Theme = "Dark",  
+Size = UDim2.fromOffset(450,450),  
+Acrylic = true,  
+HideSearchBar = true,  
+
+OpenButton = {  
+	Enabled = false  
+}
+
+})
+
+Window:Tag({
+Title = "v1.6.6",
+Icon = "github",
+Color = Color3.fromHex("#30ff6a"),
+Radius = 0, -- from 0 to 13
+})
+
+Window:SetBackgroundTransparency(0.25)
+Window:SetBackgroundImageTransparency(0.25)
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+
+local gui = Instance.new("ScreenGui", game.CoreGui)
+gui.Name = "NM_Toggle"
+
+local ICON_ID = "rbxassetid://72830195117719"
+
+local btn = Instance.new("ImageButton")
+btn.Parent = gui
+btn.Size = UDim2.fromOffset(42,42)
+btn.Position = UDim2.fromOffset(40,220)
+btn.BackgroundColor3 = Color3.fromRGB(20,20,20)
+btn.Image = ICON_ID
+btn.ScaleType = Enum.ScaleType.Fit
+btn.ImageTransparency = 0
+btn.AutoButtonColor = false
+btn.Active = true
+btn.Draggable = true
+
+btn.AnchorPoint = Vector2.new(0.5,0.5)
+
+local corner = Instance.new("UICorner", btn)
+corner.CornerRadius = UDim.new(0,10)
+
+local stroke = Instance.new("UIStroke", btn)
+stroke.Thickness = 1
+stroke.Color = Color3.fromRGB(180,180,180)
+
+local pad = Instance.new("UIPadding", btn)
+pad.PaddingTop = UDim.new(0,6)
+pad.PaddingBottom = UDim.new(0,6)
+pad.PaddingLeft = UDim.new(0,6)
+pad.PaddingRight = UDim.new(0,6)
+
+btn.MouseButton1Click:Connect(function()
+Window:Toggle()
+end)
+
+local MainTab = Window:Tab({
+Title = "Silent Hub",
+Icon = "target"
+})
+
+Window:SelectTab(1)
+
+local MainSection = MainTab:Section({
+Title = "MainSection"
+})
+
+MainSection:Slider({
+Title = "FOV",
+Desc = "Radius of Silent Aim",
+Step = 1,
+Value = {
+Min = 20,
+Max = 300,
+Default = 150,
+},
+Callback = function(v)
+FOV = v
+end
+})
+
+MainSection:Toggle({
+Title = "Infinite Stamina",
+Desc = "วิ่งไม่หมด",
+Default = false,
+Callback = function(v)
+_G.InfiniteStamina = v
+end
+})
+
+local ESPTab = Window:Tab({
+Title = "ESP",
+Icon = "eye"
+})
+
+local ESPSection = ESPTab:Section({
+Title = "Player ESP"
+})
+
+_G.NameESP = false
+_G.HealthESP = false
+_G.DistanceESP = false
+
+ESPSection:Toggle({
+Title = "Name ESP",
+Default = false,
+Callback = function(v)
+_G.NameESP = v
+end
+})
+
+ESPSection:Toggle({
+Title = "Health ESP",
+Default = false,
+Callback = function(v)
+_G.HealthESP = v
+end
+})
+
+ESPSection:Toggle({
+Title = "Distance ESP",
+Default = false,
+Callback = function(v)
+_G.DistanceESP = v
+end
+})
+
+ESPSection:Toggle({
+Title = "Weapon ESP",
+Default = false,
+Callback = function(v)
+_G.InventoryViewerEnabled = v
+end
+})
+
+local ESPCache = {}
+
+local function CreateESP(player)
+
+if player == LocalPlayer then return end
+
+local char = player.Character
+if not char then return end
+
+local head = char:FindFirstChild("Head")
+local root = char:FindFirstChild("HumanoidRootPart")
+local humanoid = char:FindFirstChildOfClass("Humanoid")
+
+if not head or not root or not humanoid then return end
+
+if ESPCache[player] then return end
+
+-- Name
+local NameGui = Instance.new("BillboardGui")
+NameGui.Size = UDim2.new(0,200,0,40)
+NameGui.StudsOffset = Vector3.new(0,2.5,0)
+NameGui.AlwaysOnTop = true
+NameGui.Parent = head
+
+local NameLabel = Instance.new("TextLabel")
+NameLabel.Size = UDim2.new(1,0,1,0)
+NameLabel.BackgroundTransparency = 1
+NameLabel.TextColor3 = Color3.new(1,1,1)
+NameLabel.TextStrokeTransparency = 0
+NameLabel.TextScaled = true
+NameLabel.Font = Enum.Font.SourceSansBold
+NameLabel.Parent = NameGui
+
+-- Info
+local InfoGui = Instance.new("BillboardGui")
+InfoGui.Size = UDim2.new(0,200,0,40)
+InfoGui.StudsOffset = Vector3.new(0,-3,0)
+InfoGui.AlwaysOnTop = true
+InfoGui.Parent = root
+
+local InfoLabel = Instance.new("TextLabel")
+InfoLabel.Size = UDim2.new(1,0,1,0)
+InfoLabel.BackgroundTransparency = 1
+InfoLabel.TextColor3 = Color3.fromRGB(0,255,0)
+InfoLabel.TextStrokeTransparency = 0
+InfoLabel.TextScaled = true
+InfoLabel.Font = Enum.Font.SourceSansBold
+InfoLabel.Parent = InfoGui
+
+ESPCache[player] = {
+Name = NameLabel,
+Info = InfoLabel,
+Humanoid = humanoid,
+Root = root
+}
+
+end
+
+local function RemoveESP(player)
+
+local esp = ESPCache[player]
+
+if esp then
+
+if esp.Name and esp.Name.Parent then
+esp.Name.Parent:Destroy()
+end
+
+if esp.Info and esp.Info.Parent then
+esp.Info.Parent:Destroy()
+end
+
+ESPCache[player] = nil
+
+end
+
+end
+
+Players.PlayerRemoving:Connect(RemoveESP)
+
+RunService.RenderStepped:Connect(function()
+
+local myChar = LocalPlayer.Character
+if not myChar then return end
+
+local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+if not myRoot then return end
+
+for _,player in pairs(Players:GetPlayers()) do
+
+if player ~= LocalPlayer then
+
+CreateESP(player)
+
+local esp = ESPCache[player]
+
+if esp and esp.Root and esp.Humanoid then
+
+local distance =
+(myRoot.Position - esp.Root.Position).Magnitude
+
+-- Name
+esp.Name.Text =
+_G.NameESP and player.Name or ""
+
+-- Info
+local info = ""
+
+if _G.HealthESP then
+info = "HP: "..math.floor(esp.Humanoid.Health)
+end
+
+if _G.DistanceESP then
+
+if info ~= "" then
+info = info.." | "
+end
+
+info = info..math.floor(distance).."m"
+
+end
+
+esp.Info.Text = info
+
+end
+
+end
+
+end
+
+end)
